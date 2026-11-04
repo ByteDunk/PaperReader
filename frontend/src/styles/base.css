@@ -1,0 +1,145 @@
+/* ===== 主题变量 ===== */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-serif: 'Charter', 'Bitstream Charter', Georgia, 'Songti SC', serif;
+
+  --bg: #f3f2ee;
+  --surface: #ffffff;
+  --surface-2: #f8f7f4;
+  --surface-3: #edece7;
+  --border: #e4e2db;
+  --border-strong: #d4d1c8;
+  --text: #2b2d33;
+  --text-2: #71757e;
+  --text-3: #a4a8b0;
+  --accent: #4c63e8;
+  --accent-soft: rgba(76, 99, 232, 0.1);
+  --on-accent: #ffffff;
+  --button-accent: #4c63e8;
+  --button-accent-hover: #3c53da;
+  --button-shadow-sm: 0 1px 2px rgba(28, 30, 38, 0.05), 0 2px 8px rgba(28, 30, 38, 0.05);
+  --success: #2f9e6e;
+  --indexing: #9746b7;
+  --warning: #c07f08;
+  --danger: #cf5555;
+  --shadow-sm: 0 1px 2px rgba(28, 30, 38, 0.05), 0 2px 8px rgba(28, 30, 38, 0.05);
+  --shadow-md: 0 4px 12px rgba(28, 30, 38, 0.08), 0 12px 32px rgba(28, 30, 38, 0.1);
+  --radius-s: 6px;
+  --radius: 9px;
+  --radius-l: 13px;
+  --dock-gap: 6px;
+  --control-height: 30px;
+  --control-padding: 10px;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: #131519;
+  --surface: #1b1e24;
+  --surface-2: #21252d;
+  --surface-3: #2a2f39;
+  --border: #2b303a;
+  --border-strong: #3a404d;
+  --text: #e3e5ea;
+  --text-2: #9aa0ac;
+  --text-3: #626875;
+  --accent: #8091ff;
+  --accent-soft: rgba(128, 145, 255, 0.15);
+  --success: #4cc38a;
+  --indexing: #cf91e8;
+  --warning: #e0a63f;
+  --danger: #e37575;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+/* ===== 重置 ===== */
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.assistant-card {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.assistant-card-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  outline: none;
+}
+::selection {
+  background: var(--accent-soft);
+}
+input[type='range'],
+input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+/* ===== 滚动条 ===== */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+/* ===== 通用工具 ===== */
+.spacer {
+  flex: 1;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

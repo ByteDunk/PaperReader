@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.log
+
+# Environment and local configuration
+.env
+.env.*
+.env-*
+!.env.example
+
+# Local files
+models/
+backend/data/library/
+tmp/pdfs/
+pdfs/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Frontend build output
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+
+# Tauri and packaging output
+.build/
+release/
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+frontend/src-tauri/.tauri/
+
+# Local editor and IDE files
+.idea/
+.vscode/
+.vs/
+*.iml
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pdf
+data/
+tmp/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

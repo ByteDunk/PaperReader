@@ -1,0 +1,11 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+mineru==4.0.12
+docvortex==0.5.16
+pypdfium2==5.14.0
+httpx==0.28.1
+python-dotenv==1.2.4
+fastembed==0.9.0
+onnxruntime==1.24.4
+sqlite-vec==0.1.6
