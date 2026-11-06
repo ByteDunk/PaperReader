@@ -7,22 +7,22 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendPath = Join-Path $ProjectRoot 'backend'
 $FrontendPath = Join-Path $ProjectRoot 'frontend'
-$BackendPython = Join-Path $BackendPath '.venv\Scripts\python.exe'
-
-if (-not (Test-Path $BackendPython)) {
-    throw "Backend virtual environment not found: $BackendPython"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    throw 'uv was not found. Please install uv first.'
 }
 
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
     throw 'npm was not found. Please install Node.js first.'
 }
 
-if ($InstallDependencies) {
-    Write-Host 'Installing backend dependencies from the domestic mirror...'
-    & $BackendPython -m pip install -r (Join-Path $BackendPath 'requirements.txt') --index-url https://mirrors.aliyun.com/pypi/simple
-    if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
+Write-Host 'Syncing backend dependencies with uv...'
+& uv sync --project $BackendPath --locked
+if ($LASTEXITCODE -ne 0) { throw 'Backend dependency synchronization failed.' }
+
+$FrontendVite = Join-Path $FrontendPath 'node_modules\.bin\vite.cmd'
+if ($InstallDependencies -or -not (Test-Path -LiteralPath $FrontendVite -PathType Leaf)) {
     Write-Host 'Installing frontend dependencies...'
-    & npm.cmd --prefix $FrontendPath ci
+    & npm.cmd --prefix $FrontendPath ci --include=dev
     if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
 }
 
@@ -34,7 +34,7 @@ foreach ($ServicePort in 8000, 5173) {
     }
 }
 
-$BackendCommand = "`$Host.UI.RawUI.WindowTitle = 'PaperReader - Backend'; & '.\backend\.venv\Scripts\python.exe' -m uvicorn backend.main:create_app --factory --reload --reload-dir backend --host 127.0.0.1 --port 8000"
+$BackendCommand = "`$Host.UI.RawUI.WindowTitle = 'PaperReader - Backend'; uv run --project '.\backend' --locked --no-sync python -m uvicorn backend.main:create_app --factory --reload --reload-dir backend --host 127.0.0.1 --port 8000"
 $FrontendCommand = "`$Host.UI.RawUI.WindowTitle = 'PaperReader - Frontend'; npm.cmd run dev"
 
 $BackendWindow = Start-Process -FilePath 'powershell.exe' -WindowStyle Normal -PassThru `

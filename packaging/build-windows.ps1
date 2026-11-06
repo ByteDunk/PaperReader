@@ -6,8 +6,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $ProjectRoot
-$BackendPython = Join-Path $ProjectRoot 'backend\.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $BackendPython)) { throw 'Create backend/.venv and install backend/requirements.txt and packaging/requirements-build.txt first.' }
+$BackendPath = Join-Path $ProjectRoot 'backend'
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv was not found. Please install uv first.' }
+& uv sync --project $BackendPath --locked --no-dev --group build
+if ($LASTEXITCODE -ne 0) { throw 'Backend dependency synchronization failed.' }
 
 # Prefer a project-local toolchain when available; normal rustup installations also work.
 $LocalCargo = Join-Path $ProjectRoot '.build\cargo'
@@ -37,7 +39,7 @@ $env:PYTHONUTF8 = '1'
 New-Item -ItemType Directory -Path (Join-Path $ProjectRoot '.build') -Force | Out-Null
 
 if (-not $SkipBackend) {
-    & $BackendPython -m PyInstaller --noconfirm --distpath .build\backend-dist --workpath .build\pyinstaller packaging\backend.spec
+    & uv run --project $BackendPath --locked --no-sync python -m PyInstaller --noconfirm --distpath .build\backend-dist --workpath .build\pyinstaller packaging\backend.spec
     if ($LASTEXITCODE -ne 0) { throw 'Backend build failed.' }
 }
 if (-not $SkipDesktop) {
@@ -48,5 +50,5 @@ if (-not $SkipDesktop) {
         if ($LASTEXITCODE -ne 0) { throw 'Tauri build failed.' }
     } finally { Pop-Location }
 }
-& $BackendPython packaging\assemble.py
+& uv run --project $BackendPath --locked --no-sync python packaging\assemble.py
 if ($LASTEXITCODE -ne 0) { throw 'Portable package assembly failed.' }
