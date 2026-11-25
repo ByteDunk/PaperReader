@@ -65,7 +65,7 @@ class PaperTools:
             if paper['state'] != 'ready':
                 self._document_key = self._document_blocks = None
                 raise ValueError(paper.get('error') or '论文正在重排，请稍候。')
-            key = (paper_id, file_stamp(self.library.directory(paper_id) / 'reflow.json'))
+            key = (paper_id, file_stamp(self.library.parse_directory(paper) / 'reflow.json'))
             if key != self._document_key:
                 self._document_key = self._document_blocks = None
                 blocks = self.library.reflow(paper_id)['blocks']

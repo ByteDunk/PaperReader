@@ -30,7 +30,7 @@ RESOURCE_SETTINGS = {
     'concurrency': ('LLM_TRANSLATION_CONCURRENCY', 5, 1, 30),
     'translation_batch_size': ('LLM_TRANSLATION_BATCH_SIZE', 10, 1, 20),
     'index_batch_size': ('RAG_BATCH_SIZE', 4, 1, 16),
-    'embedding_threads': ('RAG_CPU_THREADS', 4, 1, 16),
+    'embedding_threads': ('RAG_CPU_THREADS', 6, 1, 16),
     'model_idle_minutes': ('RAG_IDLE_MINUTES', 5, 1, 60),
 }
 

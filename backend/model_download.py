@@ -229,8 +229,65 @@ def prepare_models(directory, report=None, commands=None):
     return False
 
 
+def _run_cli(directory):
+    pending = missing_model_files(directory)
+    if not pending:
+        validate_models(directory)
+        print('本地模型已就绪。')
+        return 0
+
+    mib = 1024 ** 2
+    total = sum(group['files'][name][0] for group, name in pending)
+    prompt = f'需要从 ModelScope 下载约 {total / mib:.1f} MiB 的模型文件，是否继续？[yes/no，默认 no] '
+    while True:
+        try:
+            answer = input(prompt).strip().lower()
+        except EOFError:
+            answer = ''
+        if answer in ('yes', 'y'):
+            break
+        if answer in ('no', 'n', ''):
+            print('已取消下载。')
+            return 1
+        print('请输入 yes 或 no。')
+
+    interactive = sys.stderr.isatty()
+    last_milestone = None
+    stage_labels = {'failed': '已失败', 'retrying': '重试中', 'transferring': '下载中',
+                    'verifying': '校验中', 'preparing': '准备中', 'verified': '已校验'}
+
+    def report_progress(value):
+        nonlocal last_milestone
+        groups = value['groups']
+        downloaded = sum(group['downloaded_bytes'] for group in groups)
+        percent = 100 * downloaded // total
+        active = {group['stage'] for group in groups}
+        stage = next(label for state, label in stage_labels.items() if state in active)
+        milestone = (percent // 5, stage)
+        if not interactive and milestone == last_milestone:
+            return
+        last_milestone = milestone
+        filled = 24 * downloaded // total
+        bar = '#' * filled + '-' * (24 - filled)
+        print(f'[{bar}] {percent:3d}% {downloaded / mib:8.1f}/{total / mib:.1f} MiB {stage}',
+              file=sys.stderr, end='\r' if interactive else '\n', flush=True)
+
+    try:
+        try:
+            download_models(directory, report_progress, pending=pending)
+        finally:
+            if interactive:
+                print(file=sys.stderr)
+        validate_models(directory)
+    except (OSError, RuntimeError, httpx.HTTPError) as error:
+        print(f'模型下载失败：{error}', file=sys.stderr)
+        return 1
+
+    print('模型下载并校验完成。')
+    return 0
+
+
 if __name__ == '__main__':
     from .resources import models_dir
 
-    print('Download missing local models? Type download to confirm:', flush=True)
-    raise SystemExit(0 if prepare_models(models_dir()) else 1)
+    raise SystemExit(_run_cli(models_dir()))

@@ -1,4 +1,4 @@
-"""Index finalized parser blocks while parsing and translation continue."""
+"""Index published parser blocks while translation continues."""
 import hashlib
 import logging
 import time
@@ -29,9 +29,9 @@ class RagService:
         self.closing = False
         self.options = library.options
 
-    @property
-    def signature(self):
-        return hashlib.sha256(f'{PARSER_VERSION}:{self.embedding.signature}'.encode()).hexdigest()
+    def signature(self, paper):
+        version = paper.get('parser_version', PARSER_VERSION)
+        return hashlib.sha256(f'{version}:{self.embedding.signature}'.encode()).hexdigest()
 
     def _current(self, paper_id, revision):
         doc = self.documents.get(paper_id)
@@ -42,53 +42,15 @@ class RagService:
         if not force and now - doc.get('last_save', 0) < .5:
             return
         paper = self.library.read(paper_id)
-        progress = round(doc['processed'] / max(1, doc['total']) * (99 if doc['source_complete'] else 90))
+        progress = round(doc['processed'] / max(1, doc['total']) * 99)
         if doc['state'] == 'ready':
             progress = 100
         paper['index'] = {'state': doc['state'], 'progress': progress,
                           'completed': doc['processed'], 'total': doc['total'],
-                          'chunks': doc['chunks'], 'source_complete': doc['source_complete'],
+                          'chunks': doc['chunks'], 'source_complete': True,
                           'error': doc['error'], 'revision': doc['revision'], 'signature': doc['signature']}
         self.library.save(paper)
         doc['last_save'] = now
-
-    def start_source(self, paper_id):
-        with self.library.lock:
-            revision = uuid.uuid4().hex
-            doc = {'revision': revision, 'signature': self.signature, 'blocks': deque(), 'known': set(), 'total': 0, 'scheduled': False,
-                   'processed': 0, 'chunks': 0, 'source_complete': False, 'source_error': '',
-                   'state': 'indexing', 'error': '', 'section': ''}
-            doc['document_id'] = self.store.start(paper_id, revision, doc['signature'])
-            self.documents[paper_id] = doc
-            self._save(paper_id, doc)
-            return revision
-
-    def add_blocks(self, paper_id, revision, blocks):
-        with self.library.lock:
-            doc = self._current(paper_id, revision)
-            if not doc or doc['state'] == 'failed':
-                return
-            for block in blocks:
-                if block['id'] not in doc['known']:
-                    doc['known'].add(block['id'])
-                    doc['blocks'].append({key: block[key] for key in ('id', 'type', 'page', 'bbox', 'sources')} | {'text': source_text(block)})
-                    doc['total'] += 1
-            self._save(paper_id, doc, force=False)
-            self._schedule(paper_id, doc)
-
-    def finish_source(self, paper_id, revision, error=''):
-        with self.library.lock:
-            doc = self._current(paper_id, revision)
-            if doc:
-                doc.update(source_complete=True, source_error=error)
-                self._save(paper_id, doc)
-                if doc['state'] == 'failed':
-                    self.documents.pop(paper_id, None)
-                else:
-                    self._schedule(paper_id, doc)
-
-    def fail_source(self, paper_id, revision):
-        self.finish_source(paper_id, revision, '论文解析失败，索引未发布。')
 
     def reconcile(self, paper_ids):
         self.store.reconcile(paper_ids)
@@ -96,12 +58,17 @@ class RagService:
     def restore_ready(self, paper_id, force=False):
         with self.library.lock:
             paper = self.library.read(paper_id)
-            if not force and paper.get('index', {}).get('state') == 'ready' and self.store.current(paper_id, self.signature):
+            if not force and paper.get('index', {}).get('state') == 'ready' and self.store.current(paper_id, self.signature(paper)):
                 return
-            result = self.library.reflow(paper_id)
-            revision = self.start_source(paper_id)
-            self.add_blocks(paper_id, revision, result['blocks'])
-            self.finish_source(paper_id, revision)
+            blocks = deque({key: block[key] for key in ('id', 'type', 'page', 'bbox', 'sources')}
+                           | {'text': source_text(block)} for block in self.library.reflow(paper_id)['blocks'])
+            revision, signature = uuid.uuid4().hex, self.signature(paper)
+            doc = {'revision': revision, 'signature': signature, 'blocks': blocks, 'total': len(blocks),
+                   'scheduled': False, 'processed': 0, 'chunks': 0, 'state': 'indexing', 'error': '',
+                   'section': '', 'document_id': self.store.start(paper_id, revision, signature)}
+            self.documents[paper_id] = doc
+            self._save(paper_id, doc)
+            self._schedule(paper_id, doc)
 
     def _chunks(self, doc, blocks):
         chunks = []
@@ -135,7 +102,7 @@ class RagService:
             self.store.reset()
 
     def _schedule(self, paper_id, doc):
-        if not self.closing and not doc['scheduled'] and (doc['blocks'] or doc['source_complete']):
+        if not self.closing and not doc['scheduled']:
             doc['scheduled'] = True
             self.executor.submit(self._run, paper_id, doc['revision'])
 
@@ -147,8 +114,6 @@ class RagService:
                     return
                 blocks = [doc['blocks'].popleft() for _ in range(min(8, len(doc['blocks'])))]
                 if not blocks:
-                    if doc['source_error']:
-                        raise RuntimeError(doc['source_error'])
                     if not doc['chunks']:
                         raise RuntimeError('论文没有可索引的文字内容。')
                     self.store.publish(doc['document_id'])
@@ -184,8 +149,7 @@ class RagService:
                     doc.update(state='failed', error=str(exc) if isinstance(exc, RuntimeError) else '索引失败，请重新构建索引。')
                     doc['blocks'].clear()
                     self._save(paper_id, doc)
-                    if doc['source_complete']:
-                        self.documents.pop(paper_id, None)
+                    self.documents.pop(paper_id, None)
         finally:
             with self.library.lock:
                 doc = self._current(paper_id, revision)
@@ -203,7 +167,7 @@ class RagService:
         with self.library.lock:
             if scope == 'paper':
                 paper = self.library.read(paper_id)
-                ready = self.store.current(paper_id, self.signature)
+                ready = self.store.current(paper_id, self.signature(paper))
                 if paper.get('index', {}).get('state') != 'ready' or not ready:
                     raise IndexNotReady(paper.get('index', {}).get('error') or '当前论文索引尚未完成，请稍候。')
             else:
@@ -214,12 +178,13 @@ class RagService:
         with self.library.lock:
             papers = {paper['id']: paper for paper in self.library.list()}
             if scope == 'paper':
-                current = self.store.current(paper_id, self.signature)
-                if not current or current['revision'] != ready['revision'] or paper_id not in papers:
+                paper = papers.get(paper_id)
+                current = paper and self.store.current(paper_id, self.signature(paper))
+                if not current or current['revision'] != ready['revision']:
                     raise IndexNotReady('论文索引已改变，请重新搜索。')
             results = self.store.search(query, vector, ready['id'] if ready else None, limit)
             results = [{**item, 'paper_title': papers[item['paper_id']]['title']}
-                       for item in results if item['paper_id'] in papers]
+                       for item in results if papers.get(item['paper_id'], {}).get('index', {}).get('state') == 'ready']
             pending = sum(p.get('index', {}).get('state') != 'ready' for p in papers.values())
             return {'results': results, 'scope': scope, 'query': query,
                     'indexed_papers': len(papers) - pending, 'pending_papers': pending if scope == 'all' else 0}

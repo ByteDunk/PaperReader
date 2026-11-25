@@ -1,6 +1,7 @@
 import { computed, reactive, ref, shallowRef, watch } from 'vue'
 import { requestJson } from '../services/http.js'
-import { invalidatedPaper, papers } from './usePapers.js'
+import { activeId, document, invalidatedPaper, papers } from './usePapers.js'
+import { resolveSourceBlock } from '../services/reflowGeometry.js'
 import { openPanel } from '../dock/useLayout.js'
 
 export const bookmarks = ref([])
@@ -10,7 +11,16 @@ export const bookmarkActions = reactive({})
 export const bookmarkEditor = shallowRef(null)
 export const bookmarkSaving = ref(false)
 export const bookmarkEditorError = ref('')
-export const bookmarkIndex = computed(() => new Map(bookmarks.value.map(item => [`${item.paper_id}/${item.block_id}`, item])))
+export const bookmarkIndex = computed(() => {
+  const entries = new Map()
+  for (const item of bookmarks.value) {
+    const blockId = item.paper_id === activeId.value && document.value
+      ? resolveSourceBlock(document.value.blocks, { ...item, id: item.block_id })?.id
+      : item.block_id
+    if (blockId) entries.set(`${item.paper_id}/${blockId}`, item)
+  }
+  return entries
+})
 let initialized = false
 let pendingLoad = null
 let revision = 0

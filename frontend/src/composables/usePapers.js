@@ -165,7 +165,14 @@ export async function refreshPapers() {
   catch (e) { if (e.name === 'AbortError' || version !== refreshVersion) return; throw e }
   finally { if (pollController === controller) pollController = null }
   if (version !== refreshVersion) return
+  const previous = new Map(papers.value.map(paper => [paper.id, paper.parse_revision]))
   papers.value = result
+  for (const paper of result) {
+    if (previous.has(paper.id) && previous.get(paper.id) !== paper.parse_revision) {
+      invalidatePaper(paper.id)
+      if (paper.id === activeId.value) updateReading({ reflowBlock: '', reflowOffset: 0 })
+    }
+  }
   if (!activePaper.value && !papers.value.length) {
     ++selectionVersion
     activeId.value = ''
@@ -178,7 +185,7 @@ export async function refreshPapers() {
   if (!activePaper.value && papers.value.length) await selectPaper(papers.value[0].id)
   else if (activePaper.value?.state === 'ready' && !document.value && !loading.value) await selectPaper(activeId.value)
   if (version !== refreshVersion) return
-  if (papers.value.some(p => p.state === 'parsing' || ['translating', 'unconfigured'].includes(p.translation?.state)
+  if (papers.value.some(p => p.state === 'parsing' || p.reparsing || ['translating', 'unconfigured'].includes(p.translation?.state)
     || ['indexing', 'queued'].includes(p.index?.state))) {
     pollTimer = setTimeout(() => {
       const lifecycle = lifecycleVersion
@@ -307,10 +314,6 @@ export function reparsePaper(id) {
     const paper = await api(`/${id}/reparse`, { method: 'POST' })
     if (!current()) return
     replacePaper(paper)
-    invalidatePaper(id)
-    if (activeId.value === id) {
-      updateReading({ reflowBlock: '', reflowOffset: 0, reflowPage: 1, reflowPageProgress: 0, progress: 0 })
-    }
     await refreshPapers()
   })
 }

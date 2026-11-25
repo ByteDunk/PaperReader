@@ -4,6 +4,8 @@ from pathlib import Path
 from .resources import read_json, write_json
 
 
+EMBEDDING_ONNX_FILE = 'onnx/model_int8.onnx'
+
 MODEL_GROUPS = (
     {
         'id': 'mineru',
@@ -24,15 +26,15 @@ MODEL_GROUPS = (
     {
         'id': 'embedding',
         'title': '语义检索模型',
-        'folder': 'Qwen3-Embedding-0.6B-INT8',
-        'repository': 'Qdrant/Qwen3-Embedding-0.6B-onnx',
-        'revision': 'd6e3f582bf20423688686548ba2a030265c06b07',
+        'folder': 'BGE-M3-ONNX-INT8',
+        'repository': 'onnx-community/bge-m3-ONNX',
+        'revision': 'dbf3fc8f2b627b637528110e06ee7dd06eca688d',
         'files': {
-            'onnx/model_quantized.onnx': (1120604114, 'b39d0623bfc7d2dfc2dcc0d32152c5c5b8d61e9e74679e8222dcce5cf32486b9'),
-            'config.json': (747, 'da2b52e46d1469b9f6ff3a45e2bec36b2bb667de5ea9dd5a076e8bfe3b30cc05'),
-            'tokenizer.json': (11423705, 'def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a'),
-            'tokenizer_config.json': (5402, '1c45aaa97b2bec1d2e1ab0df53e1b2ed2f9568b871b25ca56095c0b83a5d4e93'),
-            'special_tokens_map.json': (613, '76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd'),
+            EMBEDDING_ONNX_FILE: (568479395, '2237f770aad5c71bbc1fc2d361a57f9a37400574cc9eff32626f0cdb49234730'),
+            'config.json': (658, '70dae5884ced999af00244f776ac9eaa71538d68497d3d6a6091e0318cd32905'),
+            'tokenizer.json': (17082799, '249df0778f236f6ece390de0de746838ef25b9d6954b68c2ee71249e0a9d8fd4'),
+            'tokenizer_config.json': (1203, 'b87c8703482b0300d3da30e201519aa641f6a450f5eb5bf1e624afbf70c74d80'),
+            'special_tokens_map.json': (964, '8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835'),
         },
     },
 )
