@@ -99,4 +99,4 @@ build.ps1           Windows 打包入口
 
 `.env`、PDF、模型、资料库、临时目录和构建产物已通过 `.gitignore` 排除。浏览器模式默认将资料库保存在 `backend/data/library/`。
 
-第三方模型声明见 `packaging/model-notices/`。模型和依赖的许可由各自权利人规定。
+模型和依赖的许可由各自权利人规定，请查阅对应发布页面。
