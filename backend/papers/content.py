@@ -30,15 +30,13 @@ REFERENCE_HEADING = re.compile(
     r'[\s:：.。]*$', re.IGNORECASE)
 
 
-def annotate_references(blocks, section=None):
-    """Keep section state across parser batches and page boundaries."""
-    section = dict(section or {'active': False, 'level': 1})
+def annotate_references(blocks):
+    active, level = False, 1
     for block in blocks:
         text = unicodedata.normalize('NFKC', block.get('text', '')).strip()
         heading = block['type'] in ('heading', 'title')
         if REFERENCE_HEADING.fullmatch(text):
-            section = {'active': True, 'level': block.get('level', 1)}
-        elif heading and section['active'] and block.get('level', 1) <= section['level']:
-            section['active'] = False
-        block['is_reference'] = section['active']
-    return section
+            active, level = True, block.get('level', 1)
+        elif heading and active and block.get('level', 1) <= level:
+            active = False
+        block['is_reference'] = block['type'] == 'reference' or active

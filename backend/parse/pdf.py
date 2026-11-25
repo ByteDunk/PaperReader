@@ -1,8 +1,6 @@
 """Adapt MinerU blocks to PaperReader; all source boxes use PDF points."""
 from concurrent.futures import CancelledError
 from contextlib import closing
-from copy import deepcopy
-from pathlib import Path
 from math import isfinite, sqrt
 
 import pypdfium2 as pdfium
@@ -11,7 +9,7 @@ from docvortex.document.pdf.pdfium import pdfium_guard
 from .mineru_runtime import parse_document
 from .headings import read_outline, refine_headings
 
-PARSER_VERSION = 9
+PARSER_VERSION = 10
 
 
 def pdf_info(path):
@@ -44,10 +42,7 @@ def point_box(bbox, width, height):
     return [round(v * size, 3) for v, size in zip(bbox, (width, height, width, height), strict=True)]
 
 
-def extract_pdf(path, assets_dir, on_progress=None, on_blocks=None, is_cancelled=lambda: False):
-    assets_dir = Path(assets_dir)
-    assets_dir.mkdir(parents=True, exist_ok=True)
-
+def extract_pdf(path, revision, on_progress=None, is_cancelled=lambda: False):
     def check_cancel():
         if is_cancelled():
             raise CancelledError()
@@ -68,18 +63,17 @@ def extract_pdf(path, assets_dir, on_progress=None, on_blocks=None, is_cancelled
 
     document_pages = parsed.to_dict()['pages']
     refine_headings(document_pages, pages, path, outline, check_cancel)
+    return convert_pages(document_pages, pages, formulas, metadata, revision, check_cancel, on_progress)
 
+
+def convert_pages(document_pages, pages, formulas, metadata, revision, check_cancel, on_progress):
     blocks, warnings = [], []
-    asset_count = 0
     asset_regions = {}
+    lists, previous_text = {}, {}
 
     def asset(page, bbox):
-        nonlocal asset_count
-        check_cancel()
-        asset_count += 1
-        name = f'p{page}-b{asset_count}.png'
+        name = f'{revision}-p{page}-b{len(asset_regions) + 1}.png'
         asset_regions[name] = {'page': page, 'bbox': bbox}
-        render_region(path, page - 1, bbox, assets_dir / name)
         return name
 
     def rich_text(content, page, bbox):
@@ -94,12 +88,12 @@ def extract_pdf(path, assets_dir, on_progress=None, on_blocks=None, is_cancelled
             span = {'text': node['content'], 'bold': 'bold' in styles}
             if 'subscript' in styles or 'superscript' in styles:
                 span['script'] = 'sub' if 'subscript' in styles else 'sup'
-            if node['type'] == 'equation_inline':
+            if node['type'] == 'equation_inline' and bbox:
                 candidates = formulas.get(page - 1, [])
-                match = next((item for item in candidates
-                              if ''.join(item['text'].split()) == ''.join(span['text'].split())
-                              and bbox[0] - 2 <= (item['bbox'][0] + item['bbox'][2]) / 2 <= bbox[2] + 2
-                              and bbox[1] - 2 <= (item['bbox'][1] + item['bbox'][3]) / 2 <= bbox[3] + 2), None)
+                latex = ''.join(span['text'].split())
+                match = next((item for item in candidates if item['text'] == latex
+                              and all(lo - 2 <= center <= hi + 2
+                                      for lo, center, hi in zip(bbox[:2], item['center'], bbox[2:]))), None)
                 if match:
                     span.update(asset=asset(page, match['bbox']),
                                 display_width=round(match['bbox'][2] - match['bbox'][0] + 4, 2))
@@ -107,16 +101,24 @@ def extract_pdf(path, assets_dir, on_progress=None, on_blocks=None, is_cancelled
             spans.append(span)
         return ''.join(span['text'] for span in spans), spans
 
-    def convert(node, page, width, height, parent_bbox=None):
+    def convert(node, page, width, height, parent_bbox=None, list_id=None):
         kind = node['type']
         if kind in ('header', 'footer', 'page_number', 'aside_text'):
             return
         bbox = point_box(node['bbox'], width, height) if node.get('bbox') else parent_bbox
         if kind in ('list', 'index'):
+            if kind == 'list':
+                subtype = node.get('sub_type', 'text')
+                current = f'p{page}-l{len(blocks) + 1}'
+                if not list_id:
+                    list_id = lists.get(subtype, current) if node.get('continues_prev') else current
+                    lists[subtype] = list_id
+                else:
+                    list_id = current
             for child in node['content']:
-                convert(child, page, width, height, bbox)
+                convert(child, page, width, height, bbox, list_id)
             return
-        block = {'id': f'p{page}-b{len(blocks) + 1}', 'page': page, 'bbox': bbox,
+        block = {'id': f'{revision}-p{page}-b{len(blocks) + 1}', 'page': page, 'bbox': bbox,
                  'sources': [{'page': page, 'bbox': bbox}]}
         if kind in ('image', 'table', 'chart', 'code'):
             block['type'] = 'table' if kind == 'table' else 'figure'
@@ -138,42 +140,34 @@ def extract_pdf(path, assets_dir, on_progress=None, on_blocks=None, is_cancelled
             text, spans = rich_text(node['content'], page, bbox)
             if not text.strip():
                 return
-            block.update(type={'doc_title': 'title', 'paragraph_title': 'heading',
+            block.update(type={'doc_title': 'title', 'paragraph_title': 'heading', 'ref_text': 'reference',
                                'page_footnote': 'footnote'}.get(kind, 'paragraph'), text=text, spans=spans)
             if 'level' in node:
                 block['level'] = node['level']
-            if node.get('continues_prev') and block['type'] == 'paragraph':
-                previous = next((b for b in reversed(blocks) if b['type'] == 'paragraph'), None)
-                if previous:
-                    # Continuation is decided by MinerU, never guessed from PDF fonts or gaps.
+            if list_id:
+                block['list_id'] = list_id
+            elif kind in ('text', 'ref_text'):
+                previous = previous_text.get(kind)
+                if node.get('continues_prev') and previous:
                     separator = '' if previous['text'].endswith((' ', '-', '\n')) else ' '
                     previous['text'] += separator + text
-                    if separator:
-                        previous['spans'].append({'text': separator, 'bold': False})
-                    previous['spans'].extend(spans)
+                    previous['spans'].extend(([{'text': separator, 'bold': False}] if separator else []) + spans)
                     previous['sources'].extend(block['sources'])
                     return
+                previous_text[kind] = block
         blocks.append(block)
 
-    published = 0
     for page in document_pages:
         check_cancel()
         info = pages[page['page_idx']]
         for node in page.get('blocks', []):
+            check_cancel()
             convert(node, info['number'], info['width'], info['height'])
         if not page.get('blocks'):
             warnings.append(f"第 {info['number']} 页未识别出内容，请对照原文阅读。")
-        # Retain the last paragraph until later pages have applied continues_prev.
-        stable = next((i for i in range(len(blocks) - 1, -1, -1)
-                       if blocks[i]['type'] == 'paragraph'), len(blocks))
-        if on_blocks and stable > published:
-            on_blocks(deepcopy(blocks[published:stable]))
-            published = stable
         if on_progress:
             on_progress(90 + int(info['number'] / (len(pages) + 1) * 9))
     check_cancel()
-    if on_blocks and published < len(blocks):
-        on_blocks(deepcopy(blocks[published:]))
     if on_progress:
         on_progress(99)
     title = next((b['text'] for b in blocks if b['type'] == 'title'), '')

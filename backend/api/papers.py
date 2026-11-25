@@ -1,4 +1,3 @@
-import re
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from ..papers.library import MAX_UPLOAD
+from ..papers.library import ASSET_NAME, MAX_UPLOAD
 
 
 class PaperFileResponse(Response):
@@ -148,7 +147,7 @@ def get_page(paper_id: str, number: int, request: Request, scale: int = Query(de
 
 @router.get('/{paper_id}/assets/{filename}')
 def get_asset(paper_id: str, filename: str, request: Request, scale: int = Query(default=2, ge=1, le=8)):
-    if not re.fullmatch(r'p\d+-b\d+\.png', filename):
+    if not ASSET_NAME.fullmatch(filename):
         raise HTTPException(404, '图表不存在。')
     library = request.app.state.library
     return PaperFileResponse(library, paper_id, lambda: library.asset_image(paper_id, filename, scale), media_type='image/png')

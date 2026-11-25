@@ -19,20 +19,16 @@ def configure_mineru():
                       MINERU_MODEL_BASE_DIR=str(MODELS_DIR),
                       MINERU_MODEL_SMALL_BACKEND='onnx', MINERU_MODEL_SOURCE=source)
     os.environ.setdefault('MINERU_PROCESSING_WINDOW_SIZE', '4')
-    from mineru.config import config
-    config.model.base_dir = str(MODELS_DIR)
-    config.model.small_backend = 'onnx'
-    config.model.source = source
 
 
-def parse_document(path, on_progress, is_cancelled):
+def parse_document(path, on_progress, is_cancelled, *, page_range=''):
     with MINERU_LOCK:
-        return _parse_document(path, on_progress, is_cancelled)
+        return _parse_document(path, on_progress, is_cancelled, page_range)
 
 
-def _parse_document(path, on_progress, is_cancelled):
+def _parse_document(path, on_progress, is_cancelled, page_range):
     configure_mineru()
-    from mineru import parse
+    from mineru import MinerUParser
     from mineru.backend.analysis.pdf import formulas, tables, window
 
     inline_formulas = {}
@@ -40,6 +36,16 @@ def _parse_document(path, on_progress, is_cancelled):
     process_window = window._process_pdf_window
     process_text = window._process_text_and_formulas
     split_formulas = formulas._split_formula_results
+
+    class Parser(MinerUParser):
+        def _run_analysis(self, prepared):
+            result = super()._run_analysis(prepared)
+            if prepared.retained_page_indices is not None:
+                captured = inline_formulas.copy()
+                inline_formulas.clear()
+                inline_formulas.update((prepared.retained_page_indices[i], items)
+                                       for i, items in captured.items())
+            return result
 
     def check_cancel():
         if is_cancelled():
@@ -60,16 +66,19 @@ def _parse_document(path, on_progress, is_cancelled):
             inline, display = split_formulas(values)
             for offset, (items, page_image) in enumerate(zip(inline, images, strict=True)):
                 scale = page_image['scale']
-                inline_formulas[current_page + offset] = [
-                    {'text': item['latex'], 'bbox': [v / scale for v in item['bbox']]}
-                    for item in items if item.get('latex')]
+                candidates = []
+                for item in items:
+                    if item.get('latex'):
+                        x0, y0, x1, y1 = box = [v / scale for v in item['bbox']]
+                        candidates.append({'text': ''.join(item['latex'].split()), 'bbox': box,
+                                           'center': ((x0 + x1) / 2, (y0 + y1) / 2)})
+                inline_formulas[current_page + offset] = sorted(
+                    candidates, key=lambda item: (round(item['center'][1] / 4), item['center'][0]))
             return inline, display
         with patch.object(formulas, '_split_formula_results', capture_formulas):
             return process_text(images, *args, **kwargs)
 
-    # MinerU 4.0.12 has no public table switch. Disable only its three table
-    # stages, retaining layout detection, OCR and both formula recognition paths.
-    # The lock and scoped patches prevent concurrent jobs from sharing callbacks.
+    # Keep layout, OCR and formulas while skipping table recognition.
     with ExitStack() as stack:
         check_cancel()
         stack.enter_context(visible_pdf_text())
@@ -81,6 +90,6 @@ def _parse_document(path, on_progress, is_cancelled):
             stack.enter_context(patch.object(tables, name, replacement))
         stack.enter_context(patch.object(window, '_process_pdf_window', report_window))
         stack.enter_context(patch.object(window, '_process_text_and_formulas', capture_text))
-        result = parse(path, tier='basic', ocr_mode='auto')
+        result = Parser(tier='basic', parse_mode='auto').parse(path, page_range=page_range)
         check_cancel()
     return result, inline_formulas

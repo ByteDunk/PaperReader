@@ -18,7 +18,7 @@ for package in ('mineru', 'docvortex', 'fastembed', 'tokenizers', 'onnxruntime',
                 'pypdfium2', 'pypdfium2_raw', 'jieba'):
     datas += collect_data_files(package, excludes=['datasets'] if package == 'onnxruntime' else [])
     binaries += collect_dynamic_libs(package)
-for package in ('mineru', 'docvortex', 'fastembed', 'onnxruntime', 'tokenizers', 'modelscope',
+for package in ('mineru', 'docvortex', 'fastembed', 'onnxruntime-directml', 'tokenizers', 'modelscope',
                 'huggingface-hub', 'pypdfium2', 'sqlite-vec'):
     datas += copy_metadata(package)
 

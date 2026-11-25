@@ -40,15 +40,15 @@ def _clean_clipped_separators(text):
 
 @contextmanager
 def visible_pdf_text():
-    # DocVortex 0.5.16's Hybrid snapshots default to visible_only=False. A
+    # DocVortex's Hybrid snapshots default to visible_only=False. A
     # cropped Form can then contribute its entire, repeated text outside the
     # clip, even in another column. Apply clipping BEFORE grouping characters
     # into lines; deleting strings from finished paragraphs cannot repair it.
     # The caller holds MINERU_LOCK for the entire scoped patch.
     extract = PDFDocument._extract_owned_text_snapshot
 
-    def visible(document, page_idx, page, *, visible_only, reference=True):
-        text = extract(document, page_idx, page, visible_only=True, reference=reference)
+    def visible(document, page_idx, page, *, visible_only, materialize=True):
+        text = extract(document, page_idx, page, visible_only=True, materialize=materialize)
         return _clean_clipped_separators(text) if text is not None else None
 
     def geometry(document, page_idx, *, include_extended_geometry):

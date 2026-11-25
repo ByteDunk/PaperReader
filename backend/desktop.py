@@ -13,7 +13,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 
-RESOURCE = re.compile(r'^/api/papers/[0-9a-f]{64}/(?:pages/[1-9][0-9]*\.png|assets/p[0-9]+-b[0-9]+\.png|pdf)$')
+RESOURCE = re.compile(r'^/api/papers/[0-9a-f]{64}/(?:pages/[1-9][0-9]*\.png|assets/(?:[0-9a-f]{32}-)?p[0-9]+-b[0-9]+\.png|pdf)$')
 ORIGIN = 'http://tauri.localhost'
 
 

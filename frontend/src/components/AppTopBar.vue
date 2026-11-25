@@ -22,7 +22,7 @@ async function chooseFiles(event) {
   <header class="top-bar" :class="{ 'desktop-bar': desktop }" :data-tauri-drag-region="desktop ? '' : undefined">
     <div class="brand" :data-tauri-drag-region="desktop ? '' : undefined">
       <span class="brand-logo"><img src="/app-icon.png" alt="" width="36" height="36" /></span>
-      <span class="brand-name">论文阅读器</span>
+      <span class="brand-name">文献阅读器</span>
     </div>
 
     <input ref="fileInput" type="file" accept=".pdf,application/pdf" multiple hidden @change="chooseFiles" />

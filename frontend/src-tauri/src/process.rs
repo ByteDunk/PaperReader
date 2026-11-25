@@ -207,7 +207,7 @@ pub fn show_error(message: &str) {
         MessageBoxW(
             ptr::null_mut(),
             wide(OsStr::new(message)).as_ptr(),
-            wide(OsStr::new("论文阅读器")).as_ptr(),
+            wide(OsStr::new("文献阅读器")).as_ptr(),
             MB_ICONERROR | MB_OK,
         );
     }

@@ -6,14 +6,16 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
+from ..model_catalog import EMBEDDING_ONNX_FILE, MODEL_GROUPS
 from ..resources import models_dir
 
-MODEL_DIR = models_dir() / 'Qwen3-Embedding-0.6B-INT8'
-MODEL_NAME = 'Qwen/Qwen3-Embedding-0.6B-Q'
+EMBEDDING_MODEL = MODEL_GROUPS[1]
+MODEL_DIR = models_dir() / EMBEDDING_MODEL['folder']
+MODEL_NAME = EMBEDDING_MODEL['repository']
 DIMENSION = 1024
-QUERY_PREFIX = 'Instruct: Given a question about academic papers, retrieve relevant passages that answer the question\nQuery:'
 CHUNK_TOKENS = 480
 OVERLAP_TOKENS = 48
+MODEL_REGISTRATION_LOCK = threading.Lock()
 
 
 class LocalEmbedding:
@@ -41,8 +43,8 @@ class LocalEmbedding:
             return self.cached_signature
         source = manifest.read_text(encoding='utf-8') if stat else 'model-missing'
         config = {'model': MODEL_NAME, 'manifest': source, 'runtime': 'fastembed-0.9.0/onnxruntime-1.24.4',
-                  'pooling': 'last-token', 'normalization': 'l2', 'dimension': DIMENSION,
-                  'query_prefix': QUERY_PREFIX, 'chunk_tokens': CHUNK_TOKENS, 'overlap': OVERLAP_TOKENS,
+                  'pooling': 'cls', 'normalization': 'l2', 'dimension': DIMENSION,
+                  'chunk_tokens': CHUNK_TOKENS, 'overlap': OVERLAP_TOKENS,
                   'chunk_version': 1}
         self.manifest_stamp = stamp
         self.cached_signature = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
@@ -51,10 +53,9 @@ class LocalEmbedding:
     def _check_files(self):
         if self.validated:
             return
-        names = ('onnx/model_quantized.onnx', 'tokenizer.json', 'config.json',
-                 'tokenizer_config.json', 'special_tokens_map.json', 'manifest.json')
+        names = (*EMBEDDING_MODEL['files'], 'manifest.json')
         if any(not (self.directory / name).is_file() for name in names):
-            raise RuntimeError('本地 Qwen3 INT8 模型不完整，请重新启动桌面应用完成模型下载；开发环境请运行 python -m backend.model_download。')
+            raise RuntimeError('本地 BGE-M3 INT8 模型不完整，请重新启动桌面应用完成模型下载；开发环境请运行 python -m backend.model_download。')
         self.validated = True
 
     def split(self, text, prefix=''):
@@ -86,8 +87,7 @@ class LocalEmbedding:
         with self.lock:
             self.last_used = time.monotonic()
             self._check_files()
-            values = [QUERY_PREFIX + text for text in texts] if query else texts
-            cache_key = values[0] if query and len(values) == 1 else None
+            cache_key = texts[0] if query and len(texts) == 1 else None
             if cache_key in self.query_cache:
                 self.query_cache.move_to_end(cache_key)
                 return self.query_cache[cache_key].copy()[None, :]
@@ -95,12 +95,21 @@ class LocalEmbedding:
                 self.model = None
             if self.model is None:
                 from fastembed import TextEmbedding
+                from fastembed.common.model_description import ModelSource, PoolingType
+
+                with MODEL_REGISTRATION_LOCK:
+                    if not any(model['model'] == MODEL_NAME for model in TextEmbedding.list_supported_models()):
+                        TextEmbedding.add_custom_model(
+                            model=MODEL_NAME, pooling=PoolingType.CLS, normalization=False,
+                            sources=ModelSource(url=f'https://modelscope.cn/models/{MODEL_NAME}'),
+                            dim=DIMENSION, model_file=EMBEDDING_ONNX_FILE, output_name='last_hidden_state',
+                        )
                 threads = self.threads
                 self.model = TextEmbedding(model_name=MODEL_NAME, specific_model_path=str(self.directory),
                                            local_files_only=True, threads=threads,
                                            providers=['CPUExecutionProvider'])
                 self.model_threads = threads
-            vectors = list(self.model.embed(values, batch_size=self.batch_size, parallel=None))
+            vectors = list(self.model.embed(texts, batch_size=self.batch_size, parallel=None))
             result = np.asarray(vectors, dtype=np.float32)
             if result.shape != (len(texts), DIMENSION) or not np.isfinite(result).all():
                 raise RuntimeError('嵌入模型返回了无效向量。')

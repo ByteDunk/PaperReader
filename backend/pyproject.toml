@@ -1,18 +1,19 @@
 [project]
 name = "backend"
-version = "0.1.1"
+version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.143.0",
     "uvicorn==0.54.0",
     "python-multipart==0.0.32",
-    "mineru==4.0.12",
-    "docvortex==0.5.16",
+    "mineru==4.1.7",
+    "docvortex==0.6.20",
     "pypdfium2==5.14.0",
     "httpx==0.28.1",
     "python-dotenv==1.2.4",
     "fastembed==0.9.0",
-    "onnxruntime==1.24.4",
+    "onnxruntime-directml==1.24.4 ; sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "onnxruntime==1.24.4 ; sys_platform != 'win32' or platform_machine != 'AMD64'",
     "sqlite-vec==0.1.6",
 ]
 
@@ -21,6 +22,12 @@ dev = ["pytest"]
 build = [
     "pyinstaller==6.22.0",
     "pyinstaller-hooks-contrib==2026.8",
+]
+
+[tool.uv]
+# Both wheels expose onnxruntime. FastEmbed uses the platform runtime above.
+exclude-dependencies = [
+    { package = { name = "fastembed", version = "0.9.0" }, dependencies = ["onnxruntime"] },
 ]
 
 [[tool.uv.index]]

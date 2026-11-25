@@ -86,8 +86,8 @@ function progress(paper) {
   </div>
   <Teleport to="body">
     <div v-if="menuPaper" ref="menu" class="paper-menu context-menu" :style="menuStyle" role="menu" aria-label="论文操作" @keydown="menuKeydown">
-      <button role="menuitem" :disabled="menuPaper.state === 'parsing' || Boolean(paperActions[menuPaper.id])" @click="runAction(reparsePaper)">
-        <AppIcon name="rotate-cw" :size="14" />{{ menuPaper.state === 'parsing' ? '正在重排…' : '重排论文' }}
+      <button role="menuitem" :disabled="menuPaper.state === 'parsing' || menuPaper.reparsing || Boolean(paperActions[menuPaper.id])" @click="runAction(reparsePaper)">
+        <AppIcon name="rotate-cw" :size="14" />{{ menuPaper.state === 'parsing' || menuPaper.reparsing ? '正在重排…' : '重排论文' }}
       </button>
       <button role="menuitem" :disabled="menuPaper.state !== 'ready' || Boolean(paperActions[menuPaper.id])" @click="runAction(retranslatePaper)">
         <AppIcon name="languages" :size="14" />{{ menuPaper.translation?.state === 'waiting' ? '开始翻译' : '重新翻译' }}

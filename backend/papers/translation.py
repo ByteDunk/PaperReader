@@ -1,4 +1,4 @@
-"""Persistent paragraph translation, fed by the parser while it is still running."""
+"""Persistent translation of published reflow blocks."""
 import asyncio
 import logging
 import time
@@ -108,6 +108,8 @@ class TranslationService:
         if not path.exists():
             return None
         doc = read_json(path)
+        if doc.get('parse_revision') != paper.get('parse_revision'):
+            return None
         # Older caches predate manual-start mode and were already eligible
         # for translation. Preserve that behavior regardless of new-import settings.
         doc.setdefault('awaiting_start', False)
@@ -240,7 +242,7 @@ class TranslationService:
         self.block_maps[paper_id] = {block['id']: block for block in doc['blocks']}
 
     def _reference_policy(self, doc):
-        doc['reference_section'] = annotate_references(doc['blocks'])
+        annotate_references(doc['blocks'])
         doc['translate_references'] = self.translate_references
         for block in doc['blocks']:
             self._reference_block(block)
@@ -287,59 +289,18 @@ class TranslationService:
                 self._save(paper['id'], doc)
                 self._schedule(paper['id'], doc['revision'])
 
-    def start_source(self, paper_id):
-        with self.library.lock:
-            doc = {'revision': uuid.uuid4().hex, 'parser_version': PARSER_VERSION,
-                   'awaiting_start': not self.settings.read()[0]['auto_translate'],
-                   'source_complete': False, 'source_error': '', 'error': '',
-                   'paused': False, 'unconfigured': False, 'blocks': []}
-            doc['source_revision'] = doc['revision']
-            self._reference_policy(doc)
-            self._remember(paper_id, doc)
-            self._save(paper_id, doc)
-            self._schedule(paper_id, doc['revision'])
-            return doc['revision']
-
-    def add_blocks(self, paper_id, revision, blocks):
-        with self.library.lock:
-            doc = self.documents.get(paper_id)
-            if not doc or doc['source_revision'] != revision:
-                return
-            known = self.block_maps[paper_id]
-            # Parser revisions remain valid if a setting changes mid-parse.
-            # The parser's token is independent of translation worker revisions.
-            blocks = [dict(block) for block in blocks]
-            doc['reference_section'] = annotate_references(blocks, doc['reference_section'])
-            for block in blocks:
-                if block['id'] not in known:
-                    value = entry(block)
-                    self._reference_block(value)
-                    known[block['id']] = value
-                    doc['blocks'].append(value)
-            self._save(paper_id, doc, force=False)
-            self._schedule(paper_id, doc['revision'])
-
-    def finish_source(self, paper_id, revision, error=''):
-        with self.library.lock:
-            doc = self.documents.get(paper_id)
-            if not doc or doc['source_revision'] != revision:
-                return
-            doc.update(source_complete=True, source_error=error)
-            self._save(paper_id, doc)
-            self._schedule(paper_id, doc['revision'])
-
-    def fail_source(self, paper_id, revision):
-        self.finish_source(paper_id, revision, '论文解析失败，译文可能不完整。')
-
     def restore_ready(self, paper_id):
         with self.library.lock:
+            paper = self.library.read(paper_id)
+            version = paper.get('parser_version', PARSER_VERSION)
             old = self._load(paper_id)
-            if (old and old['parser_version'] == PARSER_VERSION and self._summary(old)['state'] == 'done'
+            if (old and old['parser_version'] == version and self._summary(old)['state'] == 'done'
                     and old['translate_references'] == self.translate_references):
                 return
             result = self.library.reflow(paper_id)
-            known = {b['id']: b for b in old['blocks']} if old and old['parser_version'] == PARSER_VERSION else {}
-            doc = {**(old or {}), 'revision': uuid.uuid4().hex, 'parser_version': PARSER_VERSION,
+            known = {b['id']: b for b in old['blocks']} if old and old['parser_version'] == version else {}
+            doc = {**(old or {}), 'revision': uuid.uuid4().hex, 'parser_version': version,
+                   'parse_revision': paper.get('parse_revision'),
                    'awaiting_start': old['awaiting_start'] if old else not self.settings.read()[0]['auto_translate'],
                    'source_complete': True, 'source_error': '', 'unconfigured': False, 'blocks': []}
             for block in result['blocks']:

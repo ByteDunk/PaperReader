@@ -7,6 +7,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor, wait
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from ..parse.pdf import PARSER_VERSION, extract_pdf, pdf_info, render_region
 from ..resources import KeyedLocks, file_stamp, read_json, remove_tree, write_json
@@ -15,6 +16,7 @@ from .bookmarks import Bookmarks
 
 logger = logging.getLogger(__name__)
 MAX_UPLOAD = 50 * 1024 * 1024
+ASSET_NAME = re.compile(r'(?:[0-9a-f]{32}-)?p\d+-b\d+\.png')
 
 
 class Library:
@@ -103,29 +105,40 @@ class Library:
             return sorted([self.read(p.parent.name) for p in self.root.glob('*/paper.json')],
                           key=lambda p: p['added_at'], reverse=True)
 
+    def parse_directory(self, paper):
+        directory = self.directory(paper['id'])
+        revision = paper.get('parse_revision')
+        if revision and not re.fullmatch(r'[0-9a-f]{32}', revision):
+            raise ValueError('无效的解析版本。')
+        return directory / f'parse-{revision}' if revision else directory
+
     def reflow(self, paper_id):
         with self.lock:
             paper = self.read(paper_id)
             if paper['state'] != 'ready':
                 raise ValueError(paper['error'] or '论文正在重排，请稍候。')
-            return read_json(self.directory(paper_id) / 'reflow.json')
+            return read_json(self.parse_directory(paper) / 'reflow.json')
 
     def resume(self):
         # Only app-owned transient files are removed. Published paper data stays.
-        for pattern in ('tmp*.pdf', '*/*.tmp', '*/pages/*.tmp.png', '*/assets/hd/*.tmp.png'):
+        for pattern in ('tmp*.pdf', '*/*.tmp', '*/pages/*.tmp.png', '*/assets/hd/*.tmp.png',
+                        '*/parse-*/*.tmp.png'):
             for path in self.root.glob(pattern):
                 path.unlink(missing_ok=True)
         papers = self.list()
         if self.rag:
             self.rag.reconcile({paper['id'] for paper in papers})
         for paper in papers:
-            if paper['state'] == 'parsing' or (paper['state'] == 'ready' and paper.get('parser_version') != PARSER_VERSION):
-                paper.update(state='parsing', parse_progress=0)
-                self.save(paper)
-                self.schedule_parse(paper['id'])
-            elif paper['state'] == 'ready':
+            directory = self.directory(paper['id'])
+            for candidate in directory.glob('parse-*'):
+                if re.fullmatch(r'parse-[0-9a-f]{32}', candidate.name) and candidate != self.parse_directory(paper):
+                    remove_tree(directory, candidate)
+            if paper['state'] == 'ready':
                 for service in self._services():
                     service.restore_ready(paper['id'])
+            if paper['state'] == 'parsing' or paper.get('reparsing'):
+                self.save(self.read(paper['id']) | {'parse_progress': 0})
+                self.schedule_parse(paper['id'])
 
     def import_pdf(self, path, filename):
         with path.open('rb') as stream:
@@ -141,7 +154,7 @@ class Library:
                     raise ValueError('论文正在删除，请稍后重新导入。')
             if (self.directory(paper_id) / 'paper.json').exists():
                 paper = self.read(paper_id)
-                if paper['state'] in ('failed', 'unparsed') or (paper['state'] == 'ready' and paper.get('parser_version') != PARSER_VERSION):
+                if paper['state'] in ('failed', 'unparsed'):
                     paper.update(state='parsing', error='', parse_progress=0)
                     self.save(paper)
                     self.schedule_parse(paper_id)
@@ -179,40 +192,45 @@ class Library:
                 raise CancelledError()
 
         def update_progress(value):
-            check_cancel()
             with self.lock:
+                check_cancel()
                 current = self.read(paper_id)
                 if current.get('parse_progress') != value:
                     current['parse_progress'] = value
                     self.save(current)
 
-        revisions = []
+        revision = uuid4().hex
         try:
             check_cancel()
-            with self.file_locks.hold(paper_id):
-                remove_tree(directory, directory / 'assets')
-            with self.lock:
-                check_cancel()
-                for service in self._services():
-                    revisions.append((service, service.start_source(paper_id)))
-            def publish_blocks(blocks):
-                check_cancel()
-                for service, revision in revisions:
-                    service.add_blocks(paper_id, revision, blocks)
-            result = extract_pdf(directory / 'original.pdf', directory / 'assets', on_progress=update_progress,
-                                 on_blocks=publish_blocks if revisions else None,
-                                 is_cancelled=cancel.is_set)
+            result = extract_pdf(directory / 'original.pdf', revision, update_progress, cancel.is_set)
             result['title'] = result['title'] or paper['title']
-            check_cancel()
-            write_json(directory / 'reflow.json', result)
-            with self.lock:
+            with self.file_locks.hold(paper_id), self.lock:
+                check_cancel()
                 paper = self.read(paper_id)
-                paper.update(state='ready', parse_progress=100, parser_version=PARSER_VERSION, title=result['title'],
+                previous = self.parse_directory(paper)
+                paper.update(state='ready', reparsing=False, error='', parse_progress=100,
+                             parse_revision=revision, parser_version=PARSER_VERSION, title=result['title'],
                              authors=result['authors'], warnings=result['warnings'])
+                paper.pop('translation', None)
+                paper.pop('index', None)
+                destination = self.parse_directory(paper)
+                destination.mkdir()
+                write_json(destination / 'reflow.json', result)
                 self.save(paper)
-            for service, revision in revisions:
-                if revision:
-                    service.finish_source(paper_id, revision)
+                for service in self._services():
+                    try:
+                        service.remove(paper_id)
+                        service.restore_ready(paper_id)
+                    except Exception:
+                        logger.exception('Cannot rebuild derived data: %s', paper_id)
+                try:
+                    if previous != directory:
+                        remove_tree(directory, previous)
+                    else:
+                        remove_tree(directory, directory / 'assets')
+                        (directory / 'reflow.json').unlink(missing_ok=True)
+                except (OSError, ValueError):
+                    logger.exception('Cannot remove previous parse: %s', paper_id)
         except CancelledError:
             return
         except Exception:
@@ -221,11 +239,9 @@ class Library:
             logger.exception('PDF reflow failed: %s', paper_id)
             with self.lock:
                 paper = self.read(paper_id)
-                paper.update(state='failed', error='PDF 重排失败，原文仍可阅读。请重新导入以重试。')
+                paper.update(reparsing=False, error='PDF 重排失败，请重试。',
+                             state='ready' if paper.get('reparsing') else 'failed')
                 self.save(paper)
-            for service, revision in revisions:
-                if revision:
-                    service.fail_source(paper_id, revision)
 
     def reparse(self, paper_id):
         with self.lock:
@@ -235,7 +251,9 @@ class Library:
             job = self.jobs.get(paper_id)
             if job is not None and not job.done():
                 return paper
-            paper.update(state='parsing', parse_progress=0, error='', warnings=[])
+            has_result = paper['state'] == 'ready'
+            paper.update(state='ready' if has_result else 'parsing', reparsing=has_result,
+                         parse_progress=0, error='')
             self.save(paper)
             self.schedule_parse(paper_id)
             return paper
@@ -282,13 +300,17 @@ class Library:
         return target
 
     def asset_image(self, paper_id, filename, scale=2):
-        if not re.fullmatch(r'p\d+-b\d+\.png', filename):
+        if not ASSET_NAME.fullmatch(filename):
             raise FileNotFoundError('图表不存在')
+        paper = self.read(paper_id)
         directory = self.directory(paper_id)
+        revision = paper.get('parse_revision')
+        if revision and not filename.startswith(f'{revision}-'):
+            raise FileNotFoundError('图表不存在')
         original = directory / 'assets' / filename
-        if scale == 2 or not original.is_file():
+        if not revision and scale == 2 and original.is_file():
             return original
-        cache = directory / 'assets' / 'hd'
+        cache = self.parse_directory(paper) if revision else original.parent / 'hd'
         target = cache / f'{Path(filename).stem}@{scale}x.png'
         if target.exists():
             return target
@@ -297,13 +319,15 @@ class Library:
         except ValueError:
             return original
         region = document.get('assets', {}).get(filename)
-        if not region:
+        if not region and not revision:
             # Upgrade existing figure/table/equation assets without reparsing.
             region = next((block for block in document['blocks'] if block.get('asset') == filename), None)
         if not region or not region.get('bbox'):
             # Older inline formulas lack their precise crop; retain the image.
-            return original
-        cache.mkdir(exist_ok=True)
+            if not revision:
+                return original
+            raise FileNotFoundError('图表不存在')
+        cache.mkdir(parents=True, exist_ok=True)
         return self._render_image(directory, target, region['page'], region['bbox'], scale)
 
     def clear_cache(self, scope='partial'):
@@ -324,6 +348,10 @@ class Library:
                 remove_tree(self.directory(paper_id), pages)
                 assets = self.directory(paper_id) / 'assets'
                 remove_tree(assets, assets / 'hd')
+                paper = self.read(paper_id)
+                if paper.get('parse_revision'):
+                    for image in self.parse_directory(paper).glob('*.png'):
+                        image.unlink()
         with self.lock:
             self.metadata.clear()
         # Wait for active inference outside the library lock. The next search
@@ -349,7 +377,7 @@ class Library:
                     for service in self._services():
                         service.remove(paper_id)
                     paper.update(state='unparsed', parse_progress=0, error='', warnings=[])
-                    for key in ('parser_version', 'translation', 'index'):
+                    for key in ('parser_version', 'parse_revision', 'reparsing', 'translation', 'index'):
                         paper.pop(key, None)
                     self.save(paper)
             # Parsers own paper locks and may need the library lock to exit.

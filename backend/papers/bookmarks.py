@@ -1,8 +1,32 @@
 """User bookmarks are paper data, independent of parsing and search caches."""
 from datetime import datetime, timezone
+from math import isfinite
 from uuid import uuid4
 
 from ..resources import read_json, write_json
+
+
+def overlap(a, b):
+    if not all(box and len(box) == 4 and all(map(isfinite, box))
+               and box[2] > box[0] and box[3] > box[1] for box in (a, b)):
+        return 0
+    intersection = (max(0, min(a[2], b[2]) - max(a[0], b[0]))
+                    * max(0, min(a[3], b[3]) - max(a[1], b[1])))
+    return intersection / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - intersection)
+
+
+def matches(bookmark, block, blocks):
+    if not bookmark.get('bbox'):
+        return bookmark['block_id'] == block['id']
+
+    def score(candidate):
+        return (max((overlap(bookmark['bbox'], source.get('bbox'))
+                     for source in [candidate, *candidate.get('sources', [])]
+                     if source['page'] == bookmark['page']), default=0),
+                candidate['id'] == bookmark['block_id'])
+
+    rank = score(block)
+    return rank[0] >= .5 and max(blocks, key=score) is block
 
 
 class Bookmarks:
@@ -30,15 +54,15 @@ class Bookmarks:
             if paper_id in self.library.deleting:
                 raise FileNotFoundError('论文不存在。')
             bookmarks = self._read(paper_id)
-            existing = next((item for item in bookmarks if item['block_id'] == block_id), None)
-            if existing:
-                return self._present(existing, paper)
             if paper['state'] != 'ready':
                 raise ValueError('请等待论文重排完成后添加书签。')
             document = self.library.reflow(paper_id)
             block = next((item for item in document['blocks'] if item['id'] == block_id), None)
             if block is None:
                 raise FileNotFoundError('论文段落不存在，请刷新后重试。')
+            existing = next((item for item in bookmarks if matches(item, block, document['blocks'])), None)
+            if existing:
+                return self._present(existing, paper)
             text = block.get('text') or block.get('caption') or (
                 '论文公式' if block.get('type') == 'equation' else '论文图表' if block.get('asset') else '论文片段')
             bookmark = {'id': uuid4().hex, 'block_id': block_id, 'page': block['page'],

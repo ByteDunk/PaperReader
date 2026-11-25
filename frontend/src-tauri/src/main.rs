@@ -366,7 +366,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                desktop_startup_status, desktop_download_models])
         .setup(move |app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("论文阅读器")
+                .title("文献阅读器")
                 // Let WebView2 deliver HTML5 file and tab drags to Vue.
                 .disable_drag_drop_handler()
                 .inner_size(1440.0, 920.0)
@@ -420,6 +420,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     if let Err(error) = run() {
-        process::show_error(&format!("论文阅读器启动失败。\n{error}"));
+        process::show_error(&format!("文献阅读器启动失败。\n{error}"));
     }
 }
